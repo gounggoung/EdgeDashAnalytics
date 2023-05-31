@@ -7,9 +7,11 @@ import android.content.pm.PackageManager;
 import android.graphics.Camera;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +34,7 @@ import android.widget.Toast;
 import com.example.edgedashanalytics.R;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -73,8 +76,7 @@ public class CameraFragment extends Fragment {
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
             mCameraDevice = cameraDevice;
-            Toast.makeText(getActivity().getApplicationContext(),
-                    "Camera connection succesful", Toast.LENGTH_SHORT).show();
+            startPreview();
         }
 
         @Override
@@ -104,6 +106,10 @@ public class CameraFragment extends Fragment {
         // Required empty public constructor
     }
 
+    public static CameraFragment newInstance() {
+        return new CameraFragment();
+    }
+
     /**
      * Use this factory method to create a new instance of
      * this fragment using the provided parameters.
@@ -126,6 +132,7 @@ public class CameraFragment extends Fragment {
     private Handler mBackgroundHandler;
     private String mCameraId;
     private Size mPreviewSize;
+    private CaptureRequest.Builder mCaptureRequestBuilder;
     private static SparseIntArray ORIENTATIONS = new SparseIntArray();
     static {
         ORIENTATIONS.append(Surface.ROTATION_0, 0);
@@ -240,6 +247,38 @@ public class CameraFragment extends Fragment {
             } else {
                 cameraManager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
             }
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void startPreview() {
+        SurfaceTexture surfaceTexture = mTextureView.getSurfaceTexture();
+        surfaceTexture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
+        Surface previewSurface = new Surface(surfaceTexture);
+
+        try {
+            mCaptureRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            mCaptureRequestBuilder.addTarget(previewSurface);
+
+            mCameraDevice.createCaptureSession(Arrays.asList(previewSurface),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(@NonNull CameraCaptureSession session) {
+                            try {
+                                session.setRepeatingRequest(mCaptureRequestBuilder.build(),
+                                        null, mBackgroundHandler);
+                            } catch (CameraAccessException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        @Override
+                        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                            Toast.makeText(getActivity().getApplicationContext(),
+                                    "Unable to display preview", Toast.LENGTH_SHORT).show();
+                        }
+                    }, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
