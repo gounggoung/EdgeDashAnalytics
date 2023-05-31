@@ -2,11 +2,13 @@ package com.example.edgedashanalytics.page.main;
 
 import android.app.Activity;
 import android.content.Context;
+import android.graphics.Camera;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
@@ -14,12 +16,20 @@ import androidx.fragment.app.Fragment;
 
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.Size;
+import android.util.SparseIntArray;
 import android.view.LayoutInflater;
+import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 
 import com.example.edgedashanalytics.R;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * A simple {@link Fragment} subclass.
@@ -106,6 +116,23 @@ public class CameraFragment extends Fragment {
     private HandlerThread mBackgroundHandlerThread;
     private Handler mBackgroundHandler;
     private String mCameraId;
+    private Size mPreviewSize;
+    private static SparseIntArray ORIENTATIONS = new SparseIntArray();
+    static {
+        ORIENTATIONS.append(Surface.ROTATION_0, 0);
+        ORIENTATIONS.append(Surface.ROTATION_90, 90);
+        ORIENTATIONS.append(Surface.ROTATION_180, 180);
+        ORIENTATIONS.append(Surface.ROTATION_270, 270);
+    }
+
+    private static class CompareSizeByArea implements Comparator<Size> {
+
+        @Override
+        public int compare(Size lhs, Size rhs) {
+            return Long.signum((long) lhs.getWidth() * lhs.getHeight() /
+                    (long) rhs.getWidth() * rhs.getHeight());
+        }
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -159,6 +186,17 @@ public class CameraFragment extends Fragment {
                         CameraCharacteristics.LENS_FACING_FRONT) {
                    continue;
                }
+               StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+               int deviceOrientation = activity.getWindowManager().getDefaultDisplay().getRotation();
+               int totalRotation = sensorToDeviceRotation(characteristics, deviceOrientation);
+               boolean swapRotation = totalRotation == 90 || totalRotation == 270;
+               int rotatedWidth = width;
+               int rotatedHeight = height;
+               if(swapRotation) {
+                   rotatedWidth = height;
+                   rotatedHeight = width;
+               }
+               mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), rotatedWidth, rotatedHeight);
                mCameraId = cameraId;
            }
        } catch (CameraAccessException e) {
@@ -187,6 +225,27 @@ public class CameraFragment extends Fragment {
             mBackgroundHandler = null;
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private static int sensorToDeviceRotation(CameraCharacteristics cameraCharacteristics, int deviceOrientation) {
+        int sensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        deviceOrientation = ORIENTATIONS.get(deviceOrientation);
+        return (sensorOrientation + deviceOrientation + 360) % 360;
+    }
+
+    private static Size chooseOptimalSize(Size[] choices, int width, int height){
+        List<Size> bigEnough = new ArrayList<>();
+        for(Size option : choices) {
+            if(option.getHeight() == option.getWidth() * height/width &&
+                    option.getWidth() >= width && option.getHeight() >= height) {
+                bigEnough.add(option);
+            }
+        }
+        if(bigEnough.size() > 0){
+            return Collections.min(bigEnough, new CompareSizeByArea());
+        } else {
+            return choices[0];
         }
     }
 }
