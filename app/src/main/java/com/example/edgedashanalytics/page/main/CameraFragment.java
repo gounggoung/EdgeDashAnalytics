@@ -1,7 +1,9 @@
 package com.example.edgedashanalytics.page.main;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Camera;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
@@ -9,9 +11,11 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.os.Build;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import android.os.Handler;
@@ -23,6 +27,7 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import com.example.edgedashanalytics.R;
 
@@ -38,11 +43,13 @@ import java.util.List;
  */
 public class CameraFragment extends Fragment {
 
+    private static final int REQUEST_CAMERA_PERMISSION_RESULT = 0;
     private TextureView mTextureView;
     private TextureView.SurfaceTextureListener mSurfaceTextureListener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surfaceTexture, int width, int height) {
                 setUpCamera(width, height);
+                connectCamera();
         }
 
         @Override
@@ -66,6 +73,8 @@ public class CameraFragment extends Fragment {
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
             mCameraDevice = cameraDevice;
+            Toast.makeText(getActivity().getApplicationContext(),
+                    "Camera connection succesful", Toast.LENGTH_SHORT).show();
         }
 
         @Override
@@ -164,11 +173,22 @@ public class CameraFragment extends Fragment {
         startBackgroundThread();
         if(mTextureView.isAvailable()) {
             setUpCamera(mTextureView.getWidth(), mTextureView.getHeight());
+            connectCamera();
         } else {
             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
         }
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if(requestCode == REQUEST_CAMERA_PERMISSION_RESULT) {
+            if(grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(getActivity().getApplicationContext(),
+                        "Requires Camera Permissions", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
     @Override
     public void onPause() {
         closeCamera();
@@ -202,6 +222,27 @@ public class CameraFragment extends Fragment {
        } catch (CameraAccessException e) {
            e.printStackTrace();
        }
+    }
+
+    private void connectCamera() {
+        CameraManager cameraManager = (CameraManager) getActivity().getSystemService(Context.CAMERA_SERVICE);
+        try {
+            if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if(ContextCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED){
+                    cameraManager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
+                } else {
+                    if(shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
+                        Toast.makeText(getActivity(), "Requires access to camera", Toast.LENGTH_SHORT).show();
+                    }
+                    requestPermissions(new String[] {Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION_RESULT);
+                }
+            } else {
+                cameraManager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
+            }
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     private void closeCamera() {
