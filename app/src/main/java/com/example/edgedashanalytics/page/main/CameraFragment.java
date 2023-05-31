@@ -12,6 +12,8 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
 
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.view.LayoutInflater;
 import android.view.TextureView;
 import android.view.View;
@@ -101,6 +103,8 @@ public class CameraFragment extends Fragment {
         return fragment;
     }
 
+    private HandlerThread mBackgroundHandlerThread;
+    private Handler mBackgroundHandler;
     private String mCameraId;
 
     @Override
@@ -130,7 +134,7 @@ public class CameraFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-
+        startBackgroundThread();
         if(mTextureView.isAvailable()) {
             setUpCamera(mTextureView.getWidth(), mTextureView.getHeight());
         } else {
@@ -141,6 +145,7 @@ public class CameraFragment extends Fragment {
     @Override
     public void onPause() {
         closeCamera();
+        stopBackgroundThread();
         super.onPause();
     }
 
@@ -165,6 +170,23 @@ public class CameraFragment extends Fragment {
         if(mCameraDevice != null){
             mCameraDevice.close();
             mCameraDevice = null;
+        }
+    }
+
+    private void startBackgroundThread() {
+        mBackgroundHandlerThread = new HandlerThread("CameraBackground");
+        mBackgroundHandlerThread.start();
+        mBackgroundHandler = new Handler(mBackgroundHandlerThread.getLooper());
+    }
+
+    private void stopBackgroundThread() {
+        mBackgroundHandlerThread.quitSafely();
+        try {
+            mBackgroundHandlerThread.join();
+            mBackgroundHandlerThread = null;
+            mBackgroundHandler = null;
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 }
