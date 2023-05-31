@@ -1,6 +1,12 @@
 package com.example.edgedashanalytics.page.main;
 
+import android.app.Activity;
+import android.content.Context;
 import android.graphics.SurfaceTexture;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
@@ -21,7 +27,47 @@ import com.example.edgedashanalytics.R;
 public class CameraFragment extends Fragment {
 
     private TextureView mTextureView;
+    private TextureView.SurfaceTextureListener mSurfaceTextureListener = new TextureView.SurfaceTextureListener() {
+        @Override
+        public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surfaceTexture, int width, int height) {
+                setUpCamera(width, height);
+        }
 
+        @Override
+        public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surfaceTexture, int i, int i1) {
+
+        }
+
+        @Override
+        public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surfaceTexture) {
+            return false;
+        }
+
+        @Override
+        public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surfaceTexture) {
+
+        }
+    };
+
+    private CameraDevice mCameraDevice;
+    private CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
+        @Override
+        public void onOpened(@NonNull CameraDevice cameraDevice) {
+            mCameraDevice = cameraDevice;
+        }
+
+        @Override
+        public void onDisconnected(@NonNull CameraDevice cameraDevice) {
+            cameraDevice.close();
+            mCameraDevice = null;
+        }
+
+        @Override
+        public void onError(@NonNull CameraDevice cameraDevice, int i) {
+            cameraDevice.close();
+            mCameraDevice = null;
+        }
+    };
 
 
     // TODO: Rename parameter arguments, choose names that match
@@ -55,6 +101,8 @@ public class CameraFragment extends Fragment {
         return fragment;
     }
 
+    private String mCameraId;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -77,5 +125,46 @@ public class CameraFragment extends Fragment {
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState){
         mTextureView = (TextureView) view.findViewById(R.id.textureView);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+
+        if(mTextureView.isAvailable()) {
+            setUpCamera(mTextureView.getWidth(), mTextureView.getHeight());
+        } else {
+            mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
+        }
+    }
+
+    @Override
+    public void onPause() {
+        closeCamera();
+        super.onPause();
+    }
+
+    private void setUpCamera(int width, int height){
+        Activity activity = getActivity();
+        CameraManager cameraManager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
+       try {
+           for (String cameraId : cameraManager.getCameraIdList()) {
+               CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+               if(characteristics.get(CameraCharacteristics.LENS_FACING) ==
+                        CameraCharacteristics.LENS_FACING_FRONT) {
+                   continue;
+               }
+               mCameraId = cameraId;
+           }
+       } catch (CameraAccessException e) {
+           e.printStackTrace();
+       }
+    }
+
+    private void closeCamera() {
+        if(mCameraDevice != null){
+            mCameraDevice.close();
+            mCameraDevice = null;
+        }
     }
 }
