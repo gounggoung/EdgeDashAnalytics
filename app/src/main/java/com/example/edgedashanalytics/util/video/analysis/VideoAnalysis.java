@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.preference.PreferenceManager;
 
 import com.example.edgedashanalytics.R;
+import com.example.edgedashanalytics.model.BitmapFrame;
 import com.example.edgedashanalytics.util.TimeManager;
 import com.example.edgedashanalytics.util.file.JsonManager;
 import com.example.edgedashanalytics.util.hardware.PowerMonitor;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -107,6 +109,24 @@ public abstract class VideoAnalysis {
         processVideo(inPath, outPath);
     }
 
+    public void analyse(Bitmap frame, int frameIndex, String outpath){
+        processFrame(frame, frameIndex, outpath);
+    }
+
+    private void processFrame(Bitmap frame, int frameIndex, String outpath){
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        List<Frame> frameList = Collections.synchronizedList(new ArrayList<>(1));
+        ExecutorService frameExecutor = Executors.newFixedThreadPool(THREAD_NUM);
+//        processFramesLoop(retriever, 1, frameList, frameExecutor);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        List<Frame> frames = Collections.synchronizedList(new ArrayList<>(1));
+         executor.submit(processFrame(frame, frameIndex, executor, frames));
+
+        synchronized (frames) {
+
+            JsonManager.writeResultsToJson(outpath, frames);
+        }
+    }
     private void processVideo(String inPath, String outPath) {
         File videoFile = new File(inPath);
         String videoName = videoFile.getName();
@@ -187,6 +207,22 @@ public abstract class VideoAnalysis {
         PowerMonitor.printSummary();
     }
 
+    private Runnable processFrame(Bitmap frame, int frameIndex, ExecutorService executor, List<Frame> frames){
+        return () -> {
+            int videoWidth = frame.getWidth();
+            int videoHeight =  frame.getHeight();
+
+            float scaleFactor = getScaleFactor(videoWidth);
+            int scaledWidth = (int) (videoWidth / scaleFactor);
+            int scaledHeight = (int) (videoHeight / scaleFactor);
+
+            setup(scaledWidth, scaledHeight);
+
+            frames.add(processFrame(
+                    Bitmap.createScaledBitmap(frame, scaledWidth, scaledHeight, false), frameIndex, scaleFactor));
+
+        };
+    }
     private Runnable processFramesLoop(MediaMetadataRetriever retriever, int totalFrames,
                                        List<Frame> frames, ExecutorService executor) {
         return () -> {

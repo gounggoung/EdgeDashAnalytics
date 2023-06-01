@@ -146,7 +146,7 @@ public class OuterAnalysis extends VideoAnalysis {
             ));
         }
 
-        if (verbose) {
+        if (true/*verbose*/) {
             String resultHead = String.format(
                     Locale.ENGLISH,
                     "Analysis completed for frame: %04d\nDetected hazards: %02d\n",

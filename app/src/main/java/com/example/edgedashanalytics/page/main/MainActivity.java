@@ -245,7 +245,8 @@ public class MainActivity extends AppCompatActivity implements
         rgbFrameBitmap.setPixels(rgbBytes, 0, previewWidth, 0, 0, previewWidth, previewHeight);
         //Do your work here
         frame = new BitmapFrame(rgbFrameBitmap, frameIndex++);
-        System.out.println(frame.toString());
+        addFrame(frame);
+        getNextTransfer();
         postInferenceCallback.run();
     }
 

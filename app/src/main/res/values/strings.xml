@@ -106,4 +106,6 @@
     <string name="highest_battery_algorithm_key">highest_battery</string>
     <string name="max_capacity_algorithm_title">Max capacity</string>
     <string name="max_capacity_algorithm_key">max_capacity</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
 </resources>

@@ -456,6 +456,14 @@ public abstract class NearbyFragment extends Fragment {
         } else {
             Log.d(TAG, String.format("'%s' is already connected", endpoint));
         }
+        Context context = getContext();
+        if (context == null) {
+            Log.e(TAG, "No context");
+            return;
+        }
+        Endpoint fastest = getConnectedEndpoints().stream().max(Endpoint.compareProcessing()).orElse(null);
+        isMasterFastest = fastest != null &&
+                HardwareInfo.compareProcessing(new HardwareInfo(context), fastest.hardwareInfo) > 0;
     }
 
     public void disconnectEndpoint(Endpoint endpoint) {
@@ -635,13 +643,16 @@ public abstract class NearbyFragment extends Fragment {
         boolean localFree = analysisFutures.stream().allMatch(Future::isDone);
         boolean anyFreeEndpoint = endpoints.stream().anyMatch(Endpoint::isInactive);
 
-        if (localProcess && endpoints.size() == 1 && algorithm.equals(AlgorithmKey.max_capacity)) {
-            Video video = (Video) message.content;
-            boolean isOuter = video.isOuter();
 
-            if ((isMasterFastest && isOuter) || (!isMasterFastest && !isOuter)) {
-                Log.d(I_TAG, String.format("Processing %s locally", video.getName()));
-                analyse(video, false);
+        /**
+         * Forcing master device processing for debugging purposes
+         */
+        if (true/*localProcess && endpoints.size() == 1 && algorithm.equals(AlgorithmKey.max_capacity)*/) {
+            BitmapFrame frame =  (BitmapFrame) message.content;
+            boolean isOuter = true;
+            if (true/*(isMasterFastest && isOuter) || (!isMasterFastest && !isOuter)*/) {
+                Log.d(I_TAG, String.format("Processing %s locally", frame.getFrameIndex()));
+                analyse(frame, false);
             } else {
                 sendFile(message, endpoints.get(0));
             }
@@ -649,9 +660,9 @@ public abstract class NearbyFragment extends Fragment {
         }
 
         if (localProcess && localFree && (isMasterFastest || !anyFreeEndpoint)) {
-            Video video = (Video) message.content;
-            Log.d(I_TAG, String.format("Processing %s locally", video.getName()));
-            analyse(video, false);
+            BitmapFrame frame =  (BitmapFrame) message.content;
+            Log.d(I_TAG, String.format("Processing %s locally", frame.getFrameIndex()));
+            analyse(frame, false);
             return;
         }
 
@@ -685,7 +696,6 @@ public abstract class NearbyFragment extends Fragment {
                 selected = Algorithm.getMaxCapacityEndpoint(endpoints);
                 break;
         }
-
         sendFile(message, selected);
     }
 
@@ -695,24 +705,14 @@ public abstract class NearbyFragment extends Fragment {
             return;
         }
 
-        File fileToSend = new File(message.content.getData());
-        Uri uri = Uri.fromFile(fileToSend);
-        Payload filePayload = null;
+        Payload filePayload = Payload.fromBytes(message.content.getData().getBytes());
         Context context = getContext();
-
         if (context == null) {
             Log.e(TAG, "No context");
             return;
         }
+        System.out.println("payload: " + filePayload);
 
-        try {
-            ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r");
-            if (pfd != null) {
-                filePayload = Payload.fromFile(pfd);
-            }
-        } catch (FileNotFoundException e) {
-            Log.e(TAG, String.format("sendFile ParcelFileDescriptor error: \n%s", e.getMessage()));
-        }
 
         if (filePayload == null) {
             Log.e(I_TAG, String.format("Could not create file payload for %s", message.content));
@@ -722,7 +722,7 @@ public abstract class NearbyFragment extends Fragment {
 
         // Construct a message mapping the ID of the file payload to the desired filename and command.
         String bytesMessage = String.join(MESSAGE_SEPARATOR, message.command.toString(),
-                Long.toString(filePayload.getId()), uri.getLastPathSegment());
+                Long.toString(filePayload.getId()), message.content.getName());
 
         // Send the filename message as a bytes payload.
         // Master will send to all workers, workers will just send to master
@@ -731,8 +731,23 @@ public abstract class NearbyFragment extends Fragment {
 
         // Finally, send the file payload.
         connectionsClient.sendPayload(toEndpoint.id, filePayload);
-        toEndpoint.addJob(uri.getLastPathSegment());
+        toEndpoint.addJob(message.command.name());
         transferCount++;
+    }
+
+    private void analyse(BitmapFrame frame, boolean returnResult){
+        if (frame == null) {
+            Log.e(TAG, "No frame");
+            return;
+        }
+
+
+            waitTimes.put(frame.getName(), Instant.now());
+
+            Log.d(TAG, String.format("Analysing frame %s", frame.getName()));
+            Future<?> future = analysisExecutor.submit(analysisRunnable(frame, returnResult));
+            analysisFutures.add(future);
+
     }
 
     private void analyse(File videoFile) {
@@ -759,6 +774,52 @@ public abstract class NearbyFragment extends Fragment {
         analysisFutures.add(future);
     }
 
+
+    private Runnable analysisRunnable(BitmapFrame frame, boolean returnResult){
+        return () -> {
+                VideoAnalysis videoAnalysis = frame.isInner() ? innerAnalysis : outerAnalysis;
+                String outpath = FileManager.getResultPathOrSegmentResPathFromVideoName(frame.getName());
+                videoAnalysis.analyse(frame.getFrame(), frame.getFrameIndex(), outpath);
+                Result result = new Result(outpath);
+                System.out.println("result: " + result);
+
+          //  EventBus.getDefault().post(new RemoveEvent(frame, Type.PROCESSING));
+
+            if (!FfmpegTools.isSegment(result.getName())) {
+                EventBus.getDefault().post(new AddResultEvent(result));
+                Instant end = Instant.now();
+
+
+                if (waitTimes.containsKey(frame.getName())) {
+                    Instant start = waitTimes.remove(frame.getName());
+                    String time = TimeManager.getDurationString(start, false);
+
+                    Log.i(I_TAG, String.format("Wait time of %s: %ss", frame.getName(), time));
+                } else {
+                    Log.e(TAG, String.format("Could not record wait time of %s", frame.getName()));
+                }
+
+
+//                    TimeManager.printTurnaroundTime(frame.getName(), end);
+                    double adjust = VideoAnalysis.getEsdAdjust(Integer.toString(frame.getFrameIndex()), end, isConnected());
+
+                    if (adjust != 0) {
+                        VideoAnalysis.adjustEsd(adjust);
+                    }
+
+            }
+
+            if (returnResult) {
+                returnContent(result);
+            } else if (FfmpegTools.isSegment(result.getName())) {
+                // Master completed analysing a segment
+                handleSegment(result.getName(), null);
+                nextTransfer();
+            }
+
+            PowerMonitor.printBatteryLevel(getContext());
+        };
+    }
     private Runnable analysisRunnable(Video video, String outPath, boolean returnResult) {
         return () -> {
             String videoName = video.getName();
