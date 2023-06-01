@@ -29,6 +29,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.Range;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.LayoutInflater;
@@ -108,6 +109,8 @@ public class CameraConnectionFragment extends Fragment {
                         final TotalCaptureResult result) {
                 }
             };
+
+
 
     private String cameraId;
     private AutoFitTextureView textureView;
@@ -431,6 +434,9 @@ public class CameraConnectionFragment extends Fragment {
             // We set up a CaptureRequest.Builder with the output Surface.
             previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             previewRequestBuilder.addTarget(surface);
+
+            Range<Integer> fps = Range.create(0, 10);
+            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fps);
 
            // LOGGER.i("Opening camera preview: " + previewSize.getWidth() + "x" + previewSize.getHeight());
 

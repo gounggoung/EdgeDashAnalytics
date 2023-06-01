@@ -176,7 +176,6 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     public void onImageAvailable(ImageReader reader) {
         // We need wait until we have some size from onPreviewSizeChosen
-        System.out.println("here");
         if (previewWidth == 0 || previewHeight == 0) {
             return;
         }
