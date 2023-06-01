@@ -39,6 +39,7 @@ import com.example.edgedashanalytics.data.result.ResultRepository;
 import com.example.edgedashanalytics.data.video.ExternalStorageVideosRepository;
 import com.example.edgedashanalytics.data.video.ProcessingVideosRepository;
 import com.example.edgedashanalytics.data.video.VideosRepository;
+import com.example.edgedashanalytics.model.BitmapFrame;
 import com.example.edgedashanalytics.model.Result;
 import com.example.edgedashanalytics.model.Video;
 import com.example.edgedashanalytics.page.adapter.ProcessingAdapter;
@@ -76,6 +77,9 @@ public class MainActivity extends AppCompatActivity implements
 
     private final FragmentManager supportFragmentManager = getSupportFragmentManager();
     private Fragment activeFragment;
+
+    BitmapFrame frame;
+    private int frameIndex = 0;
 
     private final BottomNavigationView.OnItemSelectedListener bottomNavigationOnItemSelectedListener
             = new BottomNavigationView.OnItemSelectedListener() {
@@ -240,6 +244,8 @@ public class MainActivity extends AppCompatActivity implements
         rgbFrameBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888);
         rgbFrameBitmap.setPixels(rgbBytes, 0, previewWidth, 0, 0, previewWidth, previewHeight);
         //Do your work here
+        frame = new BitmapFrame(rgbFrameBitmap, frameIndex++);
+        System.out.println(frame.toString());
         postInferenceCallback.run();
     }
 
@@ -508,6 +514,10 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     public void addVideo(Video video) {
         connectionFragment.addVideo(video);
+    }
+
+    public void addFrame(BitmapFrame frame){
+        connectionFragment.addFrame(frame);
     }
 
     @Override

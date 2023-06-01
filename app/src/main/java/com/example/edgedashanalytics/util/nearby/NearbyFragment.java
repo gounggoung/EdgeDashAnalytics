@@ -7,6 +7,7 @@ import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -25,6 +26,7 @@ import com.example.edgedashanalytics.event.video.AddEvent;
 import com.example.edgedashanalytics.event.video.RemoveByNameEvent;
 import com.example.edgedashanalytics.event.video.RemoveEvent;
 import com.example.edgedashanalytics.event.video.Type;
+import com.example.edgedashanalytics.model.BitmapFrame;
 import com.example.edgedashanalytics.model.Content;
 import com.example.edgedashanalytics.model.Result;
 import com.example.edgedashanalytics.model.Video;
@@ -512,6 +514,13 @@ public abstract class NearbyFragment extends Fragment {
 
     public void addVideo(Video video) {
         queueVideo(video, Command.ANALYSE);
+    }
+
+    public void queueFrame(BitmapFrame frame, Command command){
+        transferQueue.add(new Message(frame, command));
+    }
+    public void addFrame(BitmapFrame frame){
+        queueFrame(frame, Command.ANALYSE);
     }
 
     private void returnContent(Content content) {
