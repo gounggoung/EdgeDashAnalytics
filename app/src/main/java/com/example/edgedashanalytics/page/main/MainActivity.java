@@ -5,6 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraManager;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
@@ -14,11 +19,14 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
+import android.util.Size;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.Surface;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.Fragment;
@@ -41,19 +49,22 @@ import com.example.edgedashanalytics.util.file.FileManager;
 import com.example.edgedashanalytics.util.hardware.PowerMonitor;
 import com.example.edgedashanalytics.util.nearby.Endpoint;
 import com.example.edgedashanalytics.util.nearby.NearbyFragment;
+import com.example.edgedashanalytics.util.video.ImageUtils;
 import com.example.edgedashanalytics.util.video.eventhandler.ProcessingVideosEventHandler;
 import com.example.edgedashanalytics.util.video.eventhandler.RawVideosEventHandler;
 import com.example.edgedashanalytics.util.video.eventhandler.ResultEventHandler;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.function.Consumer;
 
 public class MainActivity extends AppCompatActivity implements
-        VideoFragment.Listener, ResultsFragment.Listener, NearbyFragment.Listener {
+        VideoFragment.Listener, ResultsFragment.Listener, NearbyFragment.Listener,
+        ImageReader.OnImageAvailableListener {
     private static final String TAG = MainActivity.class.getSimpleName();
     public static final String I_TAG = "Important";
 
@@ -61,6 +72,7 @@ public class MainActivity extends AppCompatActivity implements
     private VideoFragment processingFragment;
     private ResultsFragment resultsFragment;
     private ConnectionFragment connectionFragment;
+    private CameraConnectionFragment cameraFragment;
 
     private final FragmentManager supportFragmentManager = getSupportFragmentManager();
     private Fragment activeFragment;
@@ -110,6 +122,140 @@ public class MainActivity extends AppCompatActivity implements
         DashCam.setup(this);
     }
 
+    int previewHeight = 0,previewWidth = 0;
+    int sensorOrientation;
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    protected void setCameraFragment() {
+        final CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+        String cameraId = null;
+        try {
+            cameraId = manager.getCameraIdList()[0];
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+        CameraConnectionFragment fragment;
+        CameraConnectionFragment camera2Fragment =
+                CameraConnectionFragment.newInstance(
+                        new CameraConnectionFragment.ConnectionCallback() {
+                            @Override
+                            public void onPreviewSizeChosen(final Size size, final int rotation) {
+                                previewHeight = size.getHeight();
+                                previewWidth = size.getWidth();
+                                Log.d("tryOrientation","rotation: "+rotation+"   orientation: "+getScreenOrientation()+"  "+previewWidth+"   "+previewHeight);
+                                sensorOrientation = rotation - getScreenOrientation();
+                            }
+                        },
+                        this,
+                        R.layout.fragment_camera,
+                        new Size(640, 480));
+
+        camera2Fragment.setCamera(cameraId);
+        fragment = camera2Fragment;
+        supportFragmentManager.beginTransaction().add(R.id.main_container, fragment, "5").commit();
+    }
+    protected int getScreenOrientation() {
+        switch (getWindowManager().getDefaultDisplay().getRotation()) {
+            case Surface.ROTATION_270:
+                return 270;
+            case Surface.ROTATION_180:
+                return 180;
+            case Surface.ROTATION_90:
+                return 90;
+            default:
+                return 0;
+        }
+    }
+
+    private boolean isProcessingFrame = false;
+    private byte[][] yuvBytes = new byte[3][];
+    private int[] rgbBytes = null;
+    private int yRowStride;
+    private Runnable postInferenceCallback;
+    private Runnable imageConverter;
+    private Bitmap rgbFrameBitmap;
+    @Override
+    public void onImageAvailable(ImageReader reader) {
+        // We need wait until we have some size from onPreviewSizeChosen
+        System.out.println("here");
+        if (previewWidth == 0 || previewHeight == 0) {
+            return;
+        }
+        if (rgbBytes == null) {
+            rgbBytes = new int[previewWidth * previewHeight];
+        }
+        try {
+            final Image image = reader.acquireLatestImage();
+
+            if (image == null) {
+                return;
+            }
+
+            if (isProcessingFrame) {
+                image.close();
+                return;
+            }
+            isProcessingFrame = true;
+            final Image.Plane[] planes = image.getPlanes();
+            fillBytes(planes, yuvBytes);
+            yRowStride = planes[0].getRowStride();
+            final int uvRowStride = planes[1].getRowStride();
+            final int uvPixelStride = planes[1].getPixelStride();
+
+            imageConverter =
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            ImageUtils.convertYUV420ToARGB8888(
+                                    yuvBytes[0],
+                                    yuvBytes[1],
+                                    yuvBytes[2],
+                                    previewWidth,
+                                    previewHeight,
+                                    yRowStride,
+                                    uvRowStride,
+                                    uvPixelStride,
+                                    rgbBytes);
+                        }
+                    };
+
+            postInferenceCallback =
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            image.close();
+                            isProcessingFrame = false;
+                        }
+                    };
+
+            processImage();
+
+        } catch (final Exception e) {
+            Log.d("tryError",e.getMessage());
+            return;
+        }
+
+    }
+
+    private void processImage() {
+        imageConverter.run();
+        rgbFrameBitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888);
+        rgbFrameBitmap.setPixels(rgbBytes, 0, previewWidth, 0, 0, previewWidth, previewHeight);
+        //Do your work here
+        postInferenceCallback.run();
+    }
+
+    protected void fillBytes(final Image.Plane[] planes, final byte[][] yuvBytes) {
+        // Because of the variable row stride it's not possible to know in
+        // advance the actual necessary dimensions of the yuv planes.
+        for (int i = 0; i < planes.length; ++i) {
+            final ByteBuffer buffer = planes[i].getBuffer();
+            if (yuvBytes[i] == null) {
+                yuvBytes[i] = new byte[buffer.capacity()];
+            }
+            buffer.get(yuvBytes[i]);
+        }
+    }
+
     @Override
     protected void onStop() {
         super.onStop();
@@ -150,7 +296,8 @@ public class MainActivity extends AppCompatActivity implements
                 Manifest.permission.CHANGE_WIFI_STATE,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.NFC
+                Manifest.permission.NFC,
+                Manifest.permission.CAMERA
         };
 
         if (lacksPermissions(PERMISSIONS)) {
@@ -228,10 +375,14 @@ public class MainActivity extends AppCompatActivity implements
                 new ProcessingVideosEventHandler(processingRepository), ProcessingAdapter::new);
         resultsFragment = ResultsFragment.newInstance(ActionButton.OPEN, new ResultEventHandler(resultRepository));
 
+
+        setCameraFragment();
         supportFragmentManager.beginTransaction().add(R.id.main_container, connectionFragment, "4").hide(connectionFragment).commit();
         supportFragmentManager.beginTransaction().add(R.id.main_container, resultsFragment, "3").hide(resultsFragment).commit();
         supportFragmentManager.beginTransaction().add(R.id.main_container, processingFragment, "2").hide(processingFragment).commit();
         supportFragmentManager.beginTransaction().add(R.id.main_container, rawFragment, "1").commit();
+
+
 
         rawFragment.setRepository(rawRepository);
         processingFragment.setRepository(processingRepository);
